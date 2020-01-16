@@ -15,7 +15,7 @@
 #include <iostream>
 #include <iterator>
 #include <algorithm>
-#include <array>
+#include <array>//only used for comparison demo
 using namespace std;
 
 template<class T,size_t Size>
@@ -33,14 +33,14 @@ class Array{
         size_t pos;
         iterator(Array*p):parent{p},pos{0}{}
         iterator(Array*p,size_t i):parent{p},pos{i}{}
-        T* operator+(size_t i){
+        iterator operator+(size_t i){
             if(i+pos<Size)
-            return parent->arr+pos+i;
+            return iterator(parent,pos+i);
             cerr<<"Index out range ";
             exit(1);
         }
-        T* operator-(size_t i){
-            return parent->arr+pos-i;
+        iterator operator-(size_t i){
+            return iterator(parent,pos-i);
         }
         T& operator*(){
             if(pos<Size)
@@ -88,10 +88,8 @@ class Array{
     Array(){};
     template <class iterator>
     Array(iterator i, iterator j){
-        size_t index=0;
-        while(i!=j){
-            arr[index++]=*i++;
-        }
+        if(size_t(distance(i,j))<=Size)
+        copy(i,j,arr);
     }
     Array(initializer_list<T>lst){
         if(lst.size()<=Size)
@@ -106,14 +104,14 @@ class Array{
         }
         return arr[index];
     }
-    T* operator+(size_t index){
+    iterator operator+(size_t index){
         if(index>=Size){
             cerr<<"Index out range ";
             exit(1);
         }
-        return arr+index;
+        return iterator(this,index);
     }
-    T operator*(){
+    T& operator*(){
         return arr[0];
     }
 };
@@ -124,8 +122,12 @@ int main() {
     for(auto i:a) cout<<i;
     cout<<*(a.begin()++)<<endl<<endl;
 
-    cout<<"1d array of char(reverse)"<<endl;
+    cout<<"1d array of char"<<endl;
     Array<char,5>b{'a','b','c','d','e'};
+    for(auto c:b) cout<<c;
+    cout<<endl<<endl;
+    
+    cout<<"1d array of char(reverse)"<<endl;
     reverse(b.begin(),b.end());
     for(auto c:b) cout<<c;
     cout<<endl<<endl;
