@@ -13,30 +13,20 @@ using namespace std;
 
 constexpr double cos30 = 0.86602540378;
 constexpr double sin30 = 0.5;
+constexpr char paints[] ="!/$%@";
 
 struct Point2d{
     const double x,y;
-    Point2d(double x,double y):x(x),y(y){}
-    Point2d(Point2d&&p):x(move(p.x)),y(move(p.y)){}
-    Point2d(const Point2d& p):x(p.x),y(p.y){}
 };
 
 struct Segment{
     const Point2d A,B;
     const double m,c;
-    Segment(Point2d&& a,Point2d&& b):
-        A(forward<Point2d>(a.x<b.x?a:b)),
-        B(forward<Point2d>(a.x<b.x?b:a)),
+    Segment(Point2d a,Point2d b):
+        A((a.x<b.x?a:b)),
+        B((a.x<b.x?b:a)),
         m((B.y-A.y)/(B.x-A.x)),
         c(A.y-m*A.x){}
-    Segment(Segment&&s):A(move(s.A)),
-                        B(move(s.B)),
-                        m(move(s.m)),
-                        c(move(s.c)){}
-    Segment(const Segment& s):A(s.A),
-                              B(s.B),
-                              m(s.m),
-                              c(s.c){}
 };
 
 bool segments_intersect(const Segment& s1,const Segment& s2){
@@ -74,34 +64,27 @@ struct Cube{
     vector<Point>points;
     vector<Point>frontface;
     vector<Point>sideface;
+    double height;
     vector<Point>bottomface;
-    Cube(double height,double size,double x,double y,double z){
+    Cube(double height,double size,double x,double y,double z):height(height){
         double left=x-size/2,
-            right=x+size/2,
-            top=y+size/2,
-            bottom=y-size/2-height*size,
-            front=z-size/2,
-            back=z+size/2;
-        points.emplace_back(left,top,front);
-        points.emplace_back(left,top,back);
-        points.emplace_back(right,top,back);
-        points.emplace_back(right,top,front);
-        points.emplace_back(left,bottom,front);
-        points.emplace_back(left,bottom,back);
-        points.emplace_back(right,bottom,back);
-        points.emplace_back(right,bottom,front);
-        frontface.emplace_back(left,bottom,front);
-        frontface.emplace_back(left,top,front);
-        frontface.emplace_back(right,top,front);
-        frontface.emplace_back(right,bottom,front);
-        sideface.emplace_back(right,bottom,front);
-        sideface.emplace_back(right,top,front);
-        sideface.emplace_back(right,top,back);
-        sideface.emplace_back(right,bottom,back);
-        bottomface.emplace_back(left,bottom,front);
-        bottomface.emplace_back(left,bottom,back);
-        bottomface.emplace_back(right,bottom,back);
-        bottomface.emplace_back(right,bottom,front);
+               right=x+size/2,
+               top=y+size/2,
+               bottom=y-size/2-height*size,
+               front=z-size/2,
+               back=z+size/2;
+        frontface={{left,bottom,front},
+                   {left,top,front},
+                   {right,top,front},
+                   {right,bottom,front}};
+        sideface={{right,bottom,front},
+                  {right,top,front},
+                  {right,top,back},
+                  {right,bottom,back}};
+        bottomface={{left,bottom,front},
+                    {left,bottom,back},
+                    {right,bottom,back},
+                    {right,bottom,front}};
     }
 };
 
@@ -114,167 +97,85 @@ inline double projectionY(const Point & p){
 }
 
 void cubes(){
-    const vector<char>row(ms,' ');
-    vector<vector<char>>matrix(ms*2,row);
+    vector<vector<char>>matrix(ms*2,vector<char>(ms,' '));
+    const int n=rand()%3+2;//n×n pillars
+    cout<<n<<"×"<<n<<endl;
     const double mid=((ms-1)/2.0)/cos30;
-    double cs=mid/4.0;//3×3 columns
-    vector<Cube>cubes{
-    {(double)(rand()%3),cs,mid/8.0,11.5*mid/8.0+cs*sin30,mid/8.0+3*cs},
-    {(double)(rand()%3),cs,mid/8.0+cs,11.5*mid/8.0+cs*sin30,mid/8.0+3*cs},
-    {(double)(rand()%3),cs,mid/8.0+2*cs,11.5*mid/8.0+cs*sin30,mid/8.0+3*cs},
-    {(double)(rand()%3),cs,mid/8.0+3*cs,11.5*mid/8.0+cs*sin30,mid/8.0+3*cs},
-    //back row
-    {(double)(rand()%3),cs,mid/8.0,11.5*mid/8.0+cs*sin30,mid/8.0+2*cs},
-    {(double)(rand()%3),cs,mid/8.0+cs,11.5*mid/8.0+cs*sin30,mid/8.0+2*cs},
-    {(double)(rand()%3),cs,mid/8.0+2*cs,11.5*mid/8.0+cs*sin30,mid/8.0+2*cs},
-    {(double)(rand()%3),cs,mid/8.0+3*cs,11.5*mid/8.0+cs*sin30,mid/8.0+2*cs},
-    //mid row
-    {(double)(rand()%3),cs,mid/8.0,11.5*mid/8.0+cs*sin30,mid/8.0+cs},
-    {(double)(rand()%3),cs,mid/8.0+cs,11.5*mid/8.0+cs*sin30,mid/8.0+cs},
-    {(double)(rand()%3),cs,mid/8.0+2*cs,11.5*mid/8.0+cs*sin30,mid/8.0+cs},
-    {(double)(rand()%3),cs,mid/8.0+3*cs,11.5*mid/8.0+cs*sin30,mid/8.0+cs},
-    //front row
-    {(double)(rand()%3),cs,mid/8.0,11.5*mid/8.0+cs*sin30,mid/8.0},
-    {(double)(rand()%3),cs,mid/8.0+cs,11.5*mid/8.0+cs*sin30,mid/8.0},
-    {(double)(rand()%3),cs,mid/8.0+2*cs,11.5*mid/8.0+cs*sin30,mid/8.0},
-    {(double)(rand()%3),cs,mid/8.0+3*cs,11.5*mid/8.0+cs*sin30,mid/8.0},
-    
-    };
-    for(auto c:cubes){
-        Point p0=c.frontface.at(0);
-        Point p1=c.frontface.at(1);
-        Point p2=c.frontface.at(2);
-        Point p3=c.frontface.at(3);
-        vector<Segment>segments{};
-        segments.push_back(Segment(
-                {projectionX(p0),projectionY(p0)},
-                {projectionX(p1),projectionY(p1)})
-        );
-        segments.push_back(Segment(
-                {projectionX(p1),projectionY(p1)},
-                {projectionX(p2),projectionY(p2)})
-        );
-        segments.push_back(Segment(
-                {projectionX(p2),projectionY(p2)},
-                {projectionX(p3),projectionY(p3)})
-        );
-        segments.push_back(Segment(
-                {projectionX(p3),projectionY(p3)},
-                {projectionX(p0),projectionY(p0)})
-        );
-        
-        for(double y=0;y<ms*2;y++){
-            for(double x=0;x<ms;x++){
-                int count=0;
-                for(const auto &s:segments){
-                    Segment ray({-1.0,y},{x,y});
-                    if(segments_intersect(s,ray)==true){
-                        count++;
-                    }
-                }
-                if(count%2==1){
-                    matrix.at(round(y))
-                          .at(round(x))='!';
-                }
-                
-            } 
+    const double cs=mid/n;
+    const double offset=mid/(n*2.0);
+    const vector<Cube>cubes=[&cs,&offset,&n](){
+        vector<Cube>builder;
+        for(int row=n-1;row>=0;row--){
+            for(int col=0;col<n;col++){
+                builder.emplace_back((double)(rand()%3),
+                                   cs,
+                                   offset+col*cs,
+                                   2.5*cs+n*sin30*cs,
+                                   offset+row*cs);
+            }
         }
-        
-        
-        p0=c.sideface.at(0);
-        p1=c.sideface.at(1);
-        p2=c.sideface.at(2);
-        p3=c.sideface.at(3);
-        segments.clear();
-        segments.push_back(Segment(
-                {projectionX(p0),projectionY(p0)},
-                {projectionX(p1),projectionY(p1)})
-        );
-        segments.push_back(Segment(
-                {projectionX(p1),projectionY(p1)},
-                {projectionX(p2),projectionY(p2)})
-        );
-        segments.push_back(Segment(
-                {projectionX(p2),projectionY(p2)},
-                {projectionX(p3),projectionY(p3)})
-        );
-        segments.push_back(Segment(
-                {projectionX(p3),projectionY(p3)},
-                {projectionX(p0),projectionY(p0)})
-        );
-        for(double y=0;y<ms*2;y++){
-            for(double x=0;x<ms;x++){
-                int count=0;
-                for(const auto &s:segments){
-                    Segment ray({-1.0,y},{x,y});
-                    if(segments_intersect(s,ray)==true){
-                        count++;
+        return builder;
+    }();
+    for(const auto& c:cubes){
+        vector<vector<Point>>faces{c.frontface,
+                                   c.sideface,
+                                   c.bottomface};
+        int paint=0;
+        for(const auto& f:faces){
+            const vector<Segment>segments=[&f](){
+                vector<Segment>builder;
+                const int fs=f.size();
+                for(int i=0;i<fs;i++){
+                    builder.push_back(
+                    Segment(
+                        {projectionX(f[i]),
+                        projectionY(f[i])},
+                        {projectionX(f[(i+1)%fs]),
+                        projectionY(f[(i+1)%fs])})
+                    );
+                }
+                return builder;
+            }();
+            for(double y=0;y<2*ms;y++){
+                for(double x=0;x<ms;x++){
+                    int count=0;
+                    for(const auto &s:segments){
+                        Segment ray({-1.0,y},{x,y});
+                        if(segments_intersect(s,ray)==
+                        true)
+                            count++;
                     }
-                }
-                if(count%2==1){
-                    matrix.at(round(y))
-                          .at(round(x))='/';
-                }
-                
-            } 
-        }
-        
-        
-        p0=c.bottomface.at(0);
-        p1=c.bottomface.at(1);
-        p2=c.bottomface.at(2);
-        p3=c.bottomface.at(3);
-        segments.clear();
-        segments.push_back(Segment(
-                {projectionX(p0),projectionY(p0)},
-                {projectionX(p1),projectionY(p1)})
-        );
-        segments.push_back(Segment(
-                {projectionX(p1),projectionY(p1)},
-                {projectionX(p2),projectionY(p2)})
-        );
-        segments.push_back(Segment(
-                {projectionX(p2),projectionY(p2)},
-                {projectionX(p3),projectionY(p3)})
-        );
-        segments.push_back(Segment(
-                {projectionX(p3),projectionY(p3)},
-                {projectionX(p0),projectionY(p0)})
-        );
-        for(double y=0;y<ms*2;y++){
-            for(double x=0;x<ms*2;x++){
-                int count=0;
-                for(const auto &s:segments){
-                    Segment ray({-1.0,y},{x,y});
-                    if(segments_intersect(s,ray)==true){
-                        count++;
-                    }
-                }
-                if(count%2==1){
-                    matrix.at(round(y))
-                          .at(round(x))='%';
-                }
-            } 
-        }
-        for(auto p:c.points){
-            double x=projectionX(p);
-            double y=projectionY(p);
-            matrix.at(round(y)).at(round(x))='+';
+                    if(count%2==1)
+                        matrix.at(round(y))
+                              .at(round(x))=paints[(int)((paint==2)?paint+c.height:paint)];
+                } 
+            }
+            paint++;
         }
     }
-    for(const auto& row:matrix){
-        for(const auto& value:row)
-            cout<<value;
+    for(double y=0;y<3*cs+n*cs;y++){
+        for(double x=0;x<ms;x++)
+            cout<<matrix.at(y).at(x);
         cout<<endl;
     }
 }
 
 int main() {
     srand(time(0));
-    for(int i=0;i<5;i++){
+    for(int i=0;i<25;i++){
+        cout<<i<<endl;
         cout<<string(43,'_')<<endl;
         cubes();
         cout<<string(43,'_')<<endl;
     }
     return 0;
 }
+
+
+
+
+
+
+
+
+
