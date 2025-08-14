@@ -8,11 +8,13 @@
 #include <chrono>
 #include <iomanip>
 #include <ctime>
+#include <mutex>  // for std::mutex
+#include <sstream>
 
 /**
  * @class Logger
  * @brief A simple logging utility that writes messages to separate output streams
- *        based on severity level, with timestamped entries.
+ *        based on severity level, with timestamped entries and thread safety.
  */
 class Logger {
 public:
@@ -46,6 +48,7 @@ public:
      * @param level The new minimum log level.
      */
     void setLevel(Level level) {
+        std::lock_guard<std::mutex> lock(mutex);
         minLevel = level;
     }
 
@@ -68,6 +71,7 @@ private:
     Level minLevel;
     std::ostream& out;
     std::ostream& err;
+    std::mutex mutex;  ///< Mutex to ensure thread-safe logging
 
     const std::map<Level, std::string> levelToString = {
         {Level::DEBUG,    "DEBUG"},
@@ -100,11 +104,19 @@ private:
         return oss.str();
     }
 
+    /**
+     * @brief Checks if the given log level should be output based on current minimum level.
+     */
     bool shouldLog(Level level) const {
         return static_cast<int>(level) >= static_cast<int>(minLevel);
     }
 
+    /**
+     * @brief Logs a message with timestamp and severity level to the appropriate stream.
+     */
     void log(Level level, const std::string& message) {
+        std::lock_guard<std::mutex> lock(mutex);
+
         if (!shouldLog(level)) return;
 
         std::ostream& ostr = (level >= Level::WARNING) ? err : out;
