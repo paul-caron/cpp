@@ -201,25 +201,3 @@ private:
 
 #endif // LOGGER_HPP_
 
-/**
- * @brief Example usage of Logger.
- */
-#define STRINGIFY(x) #x
-#define TOSTRING(x) STRINGIFY(x)
-#define LINENUMBER TOSTRING(__LINE__)
-
-int main() {
-    Logger logger(Logger::Level::DEBUG, std::cout, std::cerr);
-
-    logger.debug("You are here: " LINENUMBER);
-    logger.info("Server listening at https://localhost:8080");
-    logger.warning("Warning : SSL certificates expired");
-    logger.error("HTTP 501: Something didnt go as planned");
-    logger.critical("System is down!");
-
-    logger.setLevel(Logger::Level::WARNING);
-    logger.debug("This won't be logged");
-    logger.warning("This will be logged");
-
-    return 0;
-}
