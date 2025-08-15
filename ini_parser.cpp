@@ -7,6 +7,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <iostream>
 
 /// @brief Top-level namespace for INI parsing library.
 namespace ini {
@@ -98,7 +99,7 @@ namespace ini {
          * Key-value pairs defined before any section header are stored under the empty string (`""`)
          * as the section name, representing global or unscoped configuration.
          *
-         * Inline comments are stripped from both section headers and unquoted values after trimming.
+         * Inline comments are stripped only if preceded by whitespace.
          * Values enclosed in single or double quotes (e.g., `key="value with # and ;"`) preserve their contents exactly.
          *
          * Parsing stops at the first error encountered.
@@ -111,6 +112,8 @@ namespace ini {
             if (!file.is_open()) {
                 return ErrorCode::FileNotFound;
             }
+            
+            config.clear();
 
             std::string line;
             std::string currentSection;
@@ -120,17 +123,20 @@ namespace ini {
                 ++lineNumber;
                 detail::trim(line);
 
-                // Skip empty lines and comments
+                // Skip empty lines and full-line comments
                 if (line.empty() || line[0] == ';' || line[0] == '#')
                     continue;
 
-                // Strip inline comments from the entire line (find earliest ';' or '#')
+                // Strip inline comments (only if preceded by whitespace)
                 std::size_t commentPos = std::string::npos;
                 for (char commentChar : {';', '#'}) {
-                    auto pos = line.find(commentChar);
-                    if (pos != std::string::npos && (commentPos == std::string::npos || pos < commentPos)) {
-                        commentPos = pos;
+                    for (std::size_t i = 0; i < line.length(); ++i) {
+                        if (line[i] == commentChar && (i == 0 || std::isspace(static_cast<unsigned char>(line[i - 1])))) {
+                            commentPos = i;
+                            break;
+                        }
                     }
+                    if (commentPos != std::string::npos) break;
                 }
                 if (commentPos != std::string::npos) {
                     line = line.substr(0, commentPos);
@@ -166,24 +172,11 @@ namespace ini {
 
                     // Handle quoted values to prevent comment stripping
                     bool isQuoted = (value.size() >= 2) &&
-                        ((value.front() == '"' && value.back() == '"') ||
-                         (value.front() == '\'' && value.back() == '\''));
+                                    ((value.front() == '"' && value.back() == '"') ||
+                                     (value.front() == '\'' && value.back() == '\''));
 
                     if (isQuoted) {
                         value = value.substr(1, value.length() - 2); // remove surrounding quotes
-                    } else {
-                        // Strip inline comments from unquoted values
-                        std::size_t commentPos = std::string::npos;
-                        for (char commentChar : {';', '#'}) {
-                            auto pos = value.find(commentChar);
-                            if (pos != std::string::npos && (commentPos == std::string::npos || pos < commentPos)) {
-                                commentPos = pos;
-                            }
-                        }
-                        if (commentPos != std::string::npos) {
-                            value = value.substr(0, commentPos);
-                            detail::trim(value);
-                        }
                     }
 
                     // Detect duplicate key
@@ -325,44 +318,219 @@ namespace ini {
 
 } // namespace ini
 
-#endif //INI_PARSER_HPP
-
+#endif // INI_PARSER_HPP
 
 #include <iostream>
+#include <fstream>
+#include <string>
 
-int main() {
-    ini::Parser parser;
-
-    // Set some key-value pairs
-    if (parser.set("", "host", "localhost") != ini::Parser::ErrorCode::Success) {
-        std::cerr << "Failed to set global host" << std::endl;
+bool run_test(const std::string& test_name, bool condition) {
+    if (condition) {
+        std::cout << test_name << ": PASS" << std::endl;
+        return true;
+    } else {
+        std::cout << test_name << ": FAIL" << std::endl;
+        return false;
     }
-    if (parser.set("database", "user", "admin") != ini::Parser::ErrorCode::Success) {
-        std::cerr << "Failed to set database user" << std::endl;
-    }
-    if (parser.set("database", "password", "secret;pass") != ini::Parser::ErrorCode::Success) {
-        std::cerr << "Failed to set database password" << std::endl;
-    }
-
-    // Save to a file
-    auto result = parser.save("config.ini");
-    if (result != ini::Parser::ErrorCode::Success) {
-        std::cerr << "Error: " << ini::Parser::errorToString(result) << std::endl;
-        return 1;
-    }
-
-    // Load and verify
-    result = parser.load("config.ini");
-    if (result != ini::Parser::ErrorCode::Success) {
-        std::cerr << "Error: " << ini::Parser::errorToString(result) << std::endl;
-        return 1;
-    }
-
-    // Retrieve and print values
-    std::cout << "host: " << parser.get("", "host") << std::endl;
-    std::cout << "user: " << parser.get("database", "user") << std::endl;
-    std::cout << "password: " << parser.get("database", "password") << std::endl;
-
-    return 0;
 }
 
+int main() {
+    int failed_tests = 0;
+
+    // Test 1: Load non-existent file
+    {
+        ini::Parser parser;
+        auto result = parser.load("non_existent.ini");
+        if (!run_test("Test 1: Load non-existent file", result == ini::Parser::ErrorCode::FileNotFound)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 2: Save empty config
+    {
+        ini::Parser parser;
+        auto result = parser.save("empty.ini");
+        if (!run_test("Test 2: Save empty config", result == ini::Parser::ErrorCode::Success)) {
+            ++failed_tests;
+        }
+        // Load back
+        ini::Parser parser2;
+        result = parser2.load("empty.ini");
+        if (!run_test("Test 2: Load empty config", result == ini::Parser::ErrorCode::Success && parser2.data().empty())) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 3: Set and get in global section
+    {
+        ini::Parser parser;
+        auto result = parser.set("", "global_key", "global_value");
+        if (!run_test("Test 3: Set global", result == ini::Parser::ErrorCode::Success)) {
+            ++failed_tests;
+        }
+        std::string value = parser.get("", "global_key");
+        if (!run_test("Test 3: Get global", value == "global_value")) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 4: Set and get in named section
+    {
+        ini::Parser parser;
+        auto result = parser.set("section1", "key1", "value1");
+        if (!run_test("Test 4: Set in section", result == ini::Parser::ErrorCode::Success)) {
+            ++failed_tests;
+        }
+        std::string value = parser.get("section1", "key1");
+        if (!run_test("Test 4: Get in section", value == "value1")) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 5: Set with empty key (error)
+    {
+        ini::Parser parser;
+        auto result = parser.set("section", "", "value");
+        if (!run_test("Test 5: Set empty key", result == ini::Parser::ErrorCode::EmptyKey)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 6: Set with invalid section (contains [])
+    {
+        ini::Parser parser;
+        auto result = parser.set("[invalid]", "key", "value");
+        if (!run_test("Test 6: Set invalid section", result == ini::Parser::ErrorCode::InvalidSection)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 7: Overwrite existing key
+    {
+        ini::Parser parser;
+        parser.set("section", "key", "old");
+        auto result = parser.set("section", "key", "new");
+        if (!run_test("Test 7: Overwrite key", result == ini::Parser::ErrorCode::Success && parser.get("section", "key") == "new")) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 8: Save with quoting needed
+    {
+        ini::Parser parser;
+        parser.set("", "key_space", "value with space");
+        parser.set("", "key_semi", "value;with;semi");
+        parser.set("", "key_hash", "value#with#hash");
+        auto result = parser.save("quoting.ini");
+        if (!run_test("Test 8: Save with quoting", result == ini::Parser::ErrorCode::Success)) {
+            ++failed_tests;
+        }
+        // Load back
+        ini::Parser parser2;
+        result = parser2.load("quoting.ini");
+        bool check = (result == ini::Parser::ErrorCode::Success &&
+                      parser2.get("", "key_space") == "value with space" &&
+                      parser2.get("", "key_semi") == "value;with;semi" &&
+                      parser2.get("", "key_hash") == "value#with#hash");
+        if (!run_test("Test 8: Load quoted values", check)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 9: Load with global and sections, comments
+    {
+        std::ofstream file("complex.ini");
+        file << "; Global comment\n";
+        file << "global_key = global_value\n";
+        file << "# Section comment\n";
+        file << "[section1]\n";
+        file << "key1=value1 ; inline comment\n";
+        file << "key2=value2#no space inline\n";
+        file << "key3=\"quoted ; with # space\"\n";
+        file << "\n";
+        file << "[section2]\n";
+        file << "key4 = value4\n";
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("complex.ini");
+        bool check = (result == ini::Parser::ErrorCode::Success &&
+                      parser.get("", "global_key") == "global_value" &&
+                      parser.get("section1", "key1") == "value1" &&  // inline stripped
+                      parser.get("section1", "key2") == "value2#no space inline" &&  // no space, not stripped
+                      parser.get("section1", "key3") == "quoted ; with # space" &&  // quoted preserved
+                      parser.get("section2", "key4") == "value4");
+        if (!run_test("Test 9: Load complex INI", check)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 10: Load with duplicate key (error)
+    {
+        std::ofstream file("duplicate.ini");
+        file << "key=first\n";
+        file << "key=second\n";
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("duplicate.ini");
+        if (!run_test("Test 10: Load duplicate key", result == ini::Parser::ErrorCode::DuplicateKey)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 11: Load with empty key (error)
+    {
+        std::ofstream file("empty_key.ini");
+        file << " =value\n";
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("empty_key.ini");
+        if (!run_test("Test 11: Load empty key", result == ini::Parser::ErrorCode::EmptyKey)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 12: Load with invalid line (no =)
+    {
+        std::ofstream file("invalid_line.ini");
+        file << "key_only\n";
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("invalid_line.ini");
+        if (!run_test("Test 12: Load invalid line", result == ini::Parser::ErrorCode::InvalidLine)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 13: Load with empty section (error)
+    {
+        std::ofstream file("empty_section.ini");
+        file << "[]\n";
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("empty_section.ini");
+        if (!run_test("Test 13: Load empty section", result == ini::Parser::ErrorCode::InvalidSection)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 14: Get non-existent key (default value)
+    {
+        ini::Parser parser;
+        std::string value = parser.get("non_section", "non_key", "default");
+        if (!run_test("Test 14: Get non-existent", value == "default")) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 15: Save failure (e.g., invalid path, but hard to test reliably; skip or simulate)
+    // Note: Testing FileWriteFailed reliably requires a write-protected file or dir, which may not be portable.
+    // For now, assume success on valid path.
+
+    std::cout << "Total failed tests: " << failed_tests << std::endl;
+    return failed_tests > 0 ? 1 : 0;
+}
