@@ -7,22 +7,9 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
-#include <iostream>
 
-/// @brief Top-level namespace for INI parsing library.
 namespace ini {
-
-    /// @brief Internal utility namespace for string processing.
     namespace detail {
-
-        /**
-         * @brief Trim leading and trailing whitespace from a string.
-         *
-         * This function modifies the input string in-place by removing
-         * any whitespace characters from both the beginning and the end.
-         *
-         * @param s The string to trim.
-         */
         inline void trim(std::string& s) {
             s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
                 return !std::isspace(ch);
@@ -32,154 +19,138 @@ namespace ini {
             }).base(), s.end());
         }
 
-    } // namespace detail
+        inline std::string unescape(const std::string& s) {
+            std::string result;
+            result.reserve(s.size());
+            bool escaped = false;
+            for (size_t i = 0; i < s.size(); ++i) {
+                if (escaped) {
+                    switch (s[i]) {
+                        case '"': result += '"'; break;
+                        case '\'': result += '\''; break;
+                        case '\\': result += '\\'; break;
+                        case 'n': result += '\n'; break;
+                        case 't': result += '\t'; break;
+                        case 'r': result += '\r'; break;
+                        default: result += s[i]; break;
+                    }
+                    escaped = false;
+                } else if (s[i] == '\\') {
+                    escaped = true;
+                } else {
+                    result += s[i];
+                }
+            }
+            return result;
+        }
 
-    /**
-     * @brief Class to parse and store INI configuration files.
-     *
-     * This class supports INI files with:
-     * - Sections (`[section]`)
-     * - Key-value pairs (`key=value`)
-     * - Comments starting with `;` or `#` (full-line or inline)
-     *
-     * Key-value pairs defined before any section header are stored under the empty string (`""`)
-     * as the section name, representing global or unscoped configuration.
-     *
-     * Inline comments are stripped from both section headers and unquoted values after trimming.
-     * Values enclosed in single or double quotes (e.g., `key="value with # and ;"`) preserve their contents exactly.
-     */
+        inline std::string escape(const std::string& s) {
+            std::string result;
+            result.reserve(s.size() * 2);
+            for (char c : s) {
+                switch (c) {
+                    case '"': result += "\\\""; break;
+                    case '\'': result += "\\\'"; break;
+                    case '\\': result += "\\\\"; break;
+                    case '\n': result += "\\n"; break;
+                    case '\t': result += "\\t"; break;
+                    case '\r': result += "\\r"; break;
+                    default: result += c; break;
+                }
+            }
+            return result;
+        }
+    }
+
     class Parser {
     public:
-        /// @brief A section represented as a key-value mapping of strings.
         using Section = std::unordered_map<std::string, std::string>;
-
-        /// @brief The complete configuration, mapping section names to their corresponding sections.
         using Config = std::unordered_map<std::string, Section>;
 
-        /**
-         * @brief Error codes representing the status of INI parsing or operations.
-         */
         enum class ErrorCode {
-            Success,           ///< Operation completed successfully.
-            FileNotFound,      ///< Could not open the specified file.
-            InvalidSection,    ///< Found a section with an empty or invalid name.
-            InvalidLine,       ///< A line was missing the '=' delimiter.
-            EmptyKey,          ///< Found a key that is empty after trimming.
-            DuplicateKey,      ///< Encountered a duplicate key in the same section.
-            FileWriteFailed    ///< Could not write to the specified file.
+            Success,
+            FileNotFound,
+            InvalidSection,
+            InvalidLine,
+            EmptyKey,
+            DuplicateKey,
+            FileWriteFailed,
+            UnmatchedQuotes  // <-- NEW
         };
 
-        /**
-         * @brief Converts an ErrorCode enum value to a human-readable string.
-         *
-         * @param error The error code to convert.
-         * @return A string representing the error.
-         */
         static inline std::string errorToString(ErrorCode error) {
             switch (error) {
-                case ErrorCode::Success:        return "Success";
-                case ErrorCode::FileNotFound:   return "File not found";
+                case ErrorCode::Success: return "Success";
+                case ErrorCode::FileNotFound: return "File not found";
                 case ErrorCode::InvalidSection: return "Invalid section name";
-                case ErrorCode::InvalidLine:    return "Invalid line (missing '=')";
-                case ErrorCode::EmptyKey:       return "Empty key";
-                case ErrorCode::DuplicateKey:   return "Duplicate key in section";
+                case ErrorCode::InvalidLine: return "Invalid line (missing '=')";
+                case ErrorCode::EmptyKey: return "Empty key";
+                case ErrorCode::DuplicateKey: return "Duplicate key in section";
                 case ErrorCode::FileWriteFailed: return "Failed to write to file";
-                default:                        return "Unknown error";
+                case ErrorCode::UnmatchedQuotes: return "Unmatched quotes in value"; // NEW
+                default: return "Unknown error";
             }
         }
 
-        /**
-         * @brief Load and parse an INI file from disk.
-         *
-         * This method supports:
-         * - Sections denoted by `[section]`
-         * - Key-value pairs (`key=value`)
-         * - Comments starting with `;` or `#` (inline or full-line)
-         *
-         * Key-value pairs defined before any section header are stored under the empty string (`""`)
-         * as the section name, representing global or unscoped configuration.
-         *
-         * Inline comments are stripped only if preceded by whitespace.
-         * Values enclosed in single or double quotes (e.g., `key="value with # and ;"`) preserve their contents exactly.
-         *
-         * Parsing stops at the first error encountered.
-         *
-         * @param filename The path to the INI file.
-         * @return An ErrorCode indicating the success or failure reason.
-         */
+        explicit Parser(bool strict_comments = true) : strict_comments_(strict_comments) {}
+
         inline ErrorCode load(const std::string& filename) {
             std::ifstream file(filename);
-            if (!file.is_open()) {
-                return ErrorCode::FileNotFound;
-            }
-            
-            config.clear();
+            if (!file.is_open()) return ErrorCode::FileNotFound;
 
+            config.clear();
             std::string line;
             std::string currentSection;
-            size_t lineNumber = 0;
 
             while (std::getline(file, line)) {
-                ++lineNumber;
                 detail::trim(line);
+                if (line.empty() || line[0] == ';' || line[0] == '#') continue;
 
-                // Skip empty lines and full-line comments
-                if (line.empty() || line[0] == ';' || line[0] == '#')
-                    continue;
-
-                // Strip inline comments (only if preceded by whitespace)
+                bool inside_single_quote = false;
+                bool inside_double_quote = false;
                 std::size_t commentPos = std::string::npos;
-                for (char commentChar : {';', '#'}) {
-                    for (std::size_t i = 0; i < line.length(); ++i) {
-                        if (line[i] == commentChar && (i == 0 || std::isspace(static_cast<unsigned char>(line[i - 1])))) {
-                            commentPos = i;
-                            break;
-                        }
+
+                for (std::size_t i = 0; i < line.length(); ++i) {
+                    char ch = line[i];
+                    if (ch == '"' && !inside_single_quote) inside_double_quote = !inside_double_quote;
+                    else if (ch == '\'' && !inside_double_quote) inside_single_quote = !inside_single_quote;
+                    if ((ch == ';' || ch == '#') && !inside_single_quote && !inside_double_quote) {
+                        if (strict_comments_ && i > 0 && !std::isspace(static_cast<unsigned char>(line[i - 1]))) continue;
+                        commentPos = i;
+                        break;
                     }
-                    if (commentPos != std::string::npos) break;
                 }
+
                 if (commentPos != std::string::npos) {
                     line = line.substr(0, commentPos);
                     detail::trim(line);
                 }
 
-                // If line is now empty after stripping, skip it
                 if (line.empty()) continue;
 
-                // Section header
                 if (line.front() == '[' && line.back() == ']') {
                     currentSection = line.substr(1, line.length() - 2);
                     detail::trim(currentSection);
-                    if (currentSection.empty()) {
-                        return ErrorCode::InvalidSection;
-                    }
-                }
-                // Key-value pair
-                else {
+                    if (currentSection.empty()) return ErrorCode::InvalidSection;
+                } else {
                     auto pos = line.find('=');
-                    if (pos == std::string::npos) {
-                        return ErrorCode::InvalidLine;
-                    }
+                    if (pos == std::string::npos) return ErrorCode::InvalidLine;
 
                     std::string key = line.substr(0, pos);
                     std::string value = line.substr(pos + 1);
                     detail::trim(key);
                     detail::trim(value);
 
-                    if (key.empty()) {
-                        return ErrorCode::EmptyKey;
+                    if (key.empty()) return ErrorCode::EmptyKey;
+
+                    if (value.size() >= 1 && (value.front() == '"' || value.front() == '\'')) {
+                        char quote = value.front();
+                        if (value.size() < 2 || value.back() != quote) {
+                            return ErrorCode::UnmatchedQuotes;
+                        }
+                        value = detail::unescape(value.substr(1, value.length() - 2));
                     }
 
-                    // Handle quoted values to prevent comment stripping
-                    bool isQuoted = (value.size() >= 2) &&
-                                    ((value.front() == '"' && value.back() == '"') ||
-                                     (value.front() == '\'' && value.back() == '\''));
-
-                    if (isQuoted) {
-                        value = value.substr(1, value.length() - 2); // remove surrounding quotes
-                    }
-
-                    // Detect duplicate key
                     if (config[currentSection].find(key) != config[currentSection].end()) {
                         return ErrorCode::DuplicateKey;
                     }
@@ -191,16 +162,6 @@ namespace ini {
             return ErrorCode::Success;
         }
 
-        /**
-         * @brief Retrieve a value for a given section and key.
-         *
-         * If the section or key does not exist, returns the specified default value.
-         *
-         * @param section The section name to search in.
-         * @param key The key name to look for.
-         * @param defaultValue The value to return if the key is not found.
-         * @return The corresponding value, or `defaultValue` if not found.
-         */
         inline std::string get(const std::string& section, const std::string& key, const std::string& defaultValue = "") const {
             auto secIt = config.find(section);
             if (secIt != config.end()) {
@@ -212,111 +173,66 @@ namespace ini {
             return defaultValue;
         }
 
-        /**
-         * @brief Set a key-value pair in the specified section.
-         *
-         * If the section does not exist, it is created. If the key already exists
-         * in the section, it is overwritten. Empty keys are not allowed.
-         *
-         * @param section The section name to set the key-value pair in.
-         * @param key The key to set.
-         * @param value The value to associate with the key.
-         * @return An ErrorCode indicating the success or failure reason.
-         */
         inline ErrorCode set(const std::string& section, const std::string& key, const std::string& value) {
             std::string trimmedKey = key;
             detail::trim(trimmedKey);
-            if (trimmedKey.empty()) {
-                return ErrorCode::EmptyKey;
-            }
+            if (trimmedKey.empty()) return ErrorCode::EmptyKey;
 
             std::string trimmedSection = section;
             detail::trim(trimmedSection);
-            if (trimmedSection.find_first_of("[]") != std::string::npos) {
-                return ErrorCode::InvalidSection;
-            }
+            if (trimmedSection.find_first_of("[]") != std::string::npos) return ErrorCode::InvalidSection;
 
             config[trimmedSection][trimmedKey] = value;
             return ErrorCode::Success;
         }
 
-        /**
-         * @brief Save the configuration to a file in INI format.
-         *
-         * Writes all sections and key-value pairs to the specified file.
-         * Global key-value pairs (under the empty section "") are written first,
-         * followed by named sections. Sections are written in the format `[section]`,
-         * and key-value pairs are written as `key=value`. Values containing
-         * spaces, semicolons, or hashes are automatically quoted with double quotes.
-         *
-         * @param filename The path to the file to write.
-         * @return An ErrorCode indicating the success or failure reason.
-         */
         inline ErrorCode save(const std::string& filename) const {
             std::ofstream file(filename);
-            if (!file.is_open()) {
-                return ErrorCode::FileWriteFailed;
-            }
+            if (!file.is_open()) return ErrorCode::FileWriteFailed;
 
-            // Write global section (empty section name) first
             auto globalIt = config.find("");
             if (globalIt != config.end() && !globalIt->second.empty()) {
                 for (const auto& [key, value] : globalIt->second) {
-                    // Quote values containing spaces, semicolons, or hashes
-                    bool needsQuotes = (value.find_first_of(" ;#") != std::string::npos);
+                    bool needsQuotes = (value.find_first_of(" ;#\"\n\t\r") != std::string::npos);
                     file << key << "=";
                     if (needsQuotes) {
-                        file << "\"" << value << "\"";
+                        file << "\"" << detail::escape(value) << "\"";
                     } else {
                         file << value;
                     }
                     file << "\n";
                 }
-                file << "\n"; // Add blank line after global section
+                file << "\n";
             }
 
-            // Write named sections
             for (const auto& [section, pairs] : config) {
-                if (section.empty()) continue; // Skip global section
+                if (section.empty()) continue;
                 file << "[" << section << "]\n";
                 for (const auto& [key, value] : pairs) {
-                    // Quote values containing spaces, semicolons, or hashes
-                    bool needsQuotes = (value.find_first_of(" ;#") != std::string::npos);
+                    bool needsQuotes = (value.find_first_of(" ;#\"\n\t\r") != std::string::npos);
                     file << key << "=";
                     if (needsQuotes) {
-                        file << "\"" << value << "\"";
+                        file << "\"" << detail::escape(value) << "\"";
                     } else {
                         file << value;
                     }
                     file << "\n";
                 }
-                file << "\n"; // Add blank line after each section
+                file << "\n";
             }
 
-            if (file.fail()) {
-                return ErrorCode::FileWriteFailed;
-            }
-
-            return ErrorCode::Success;
+            return file.fail() ? ErrorCode::FileWriteFailed : ErrorCode::Success;
         }
 
-        /**
-         * @brief Access the full parsed configuration data.
-         *
-         * Provides read-only access to all sections and their key-value pairs.
-         *
-         * @return A constant reference to the internal configuration map.
-         */
         inline const Config& data() const {
             return config;
         }
 
     private:
-        /// @brief Internal storage for the parsed configuration data.
         Config config;
+        bool strict_comments_;
     };
-
-} // namespace ini
+}
 
 #endif // INI_PARSER_HPP
 
@@ -456,9 +372,9 @@ int main() {
         auto result = parser.load("complex.ini");
         bool check = (result == ini::Parser::ErrorCode::Success &&
                       parser.get("", "global_key") == "global_value" &&
-                      parser.get("section1", "key1") == "value1" &&  // inline stripped
-                      parser.get("section1", "key2") == "value2#no space inline" &&  // no space, not stripped
-                      parser.get("section1", "key3") == "quoted ; with # space" &&  // quoted preserved
+                      parser.get("section1", "key1") == "value1" &&
+                      parser.get("section1", "key2") == "value2#no space inline" &&
+                      parser.get("section1", "key3") == "quoted ; with # space" &&
                       parser.get("section2", "key4") == "value4");
         if (!run_test("Test 9: Load complex INI", check)) {
             ++failed_tests;
@@ -527,9 +443,136 @@ int main() {
         }
     }
 
-    // Test 15: Save failure (e.g., invalid path, but hard to test reliably; skip or simulate)
-    // Note: Testing FileWriteFailed reliably requires a write-protected file or dir, which may not be portable.
-    // For now, assume success on valid path.
+    // Test 15: Non-spaced inline comments (relaxed mode)
+    {
+        std::ofstream file("non_spaced.ini");
+        file << "key1=value1;comment\n";
+        file << "key2=value2#comment\n";
+        file.close();
+
+        ini::Parser parser(false); // Relaxed comment parsing
+        auto result = parser.load("non_spaced.ini");
+        bool check = (result == ini::Parser::ErrorCode::Success &&
+                      parser.get("", "key1") == "value1" &&
+                      parser.get("", "key2") == "value2");
+        if (!run_test("Test 15: Non-spaced inline comments (relaxed)", check)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 16: Escaped values
+    {
+        std::ofstream file("escaped.ini");
+        file << "key1=\"value \\\"with\\\" quote\\nline\"\n";
+        file << "key2='escaped \\'single\\' quote\\t'\n";
+        file << "key3=\"backslash \\\\ here\"\n";
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("escaped.ini");
+        bool check = (result == ini::Parser::ErrorCode::Success &&
+                      parser.get("", "key1") == "value \"with\" quote\nline" &&
+                      parser.get("", "key2") == "escaped 'single' quote\t" &&
+                      parser.get("", "key3") == "backslash \\ here");
+        if (!run_test("Test 16: Escaped values", check)) {
+            ++failed_tests;
+        }
+        // Round-trip test
+        parser.save("escaped_roundtrip.ini");
+        ini::Parser parser2;
+        result = parser2.load("escaped_roundtrip.ini");
+        check = (result == ini::Parser::ErrorCode::Success &&
+                 parser2.get("", "key1") == "value \"with\" quote\nline" &&
+                 parser2.get("", "key2") == "escaped 'single' quote\t" &&
+                 parser2.get("", "key3") == "backslash \\ here");
+        if (!run_test("Test 16: Escaped values round-trip", check)) {
+            ++failed_tests;
+        }
+    }
+    
+    // Test 17: Unmatched quotes
+    {
+        std::ofstream file("unmatched_quotes.ini");
+        file << "key1=\"unmatched\n";     // Missing closing quote
+        //file << "key2=value\"\n";         // Closing quote without opening
+        file << "key3='single\n";         // Missing closing single quote
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("unmatched_quotes.ini");
+
+        bool check = (result == ini::Parser::ErrorCode::UnmatchedQuotes);
+        if (!run_test("Test 17: Unmatched quotes", check)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 18: Trailing backslash in quoted value
+    {
+        std::ofstream file("trailing_backslash.ini");
+        file << "key=\"value\\\\\"\n";
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("trailing_backslash.ini");
+        bool check = (result == ini::Parser::ErrorCode::Success &&
+                      parser.get("", "key") == "value\\");
+        if (!run_test("Test 18: Trailing backslash in quoted value", check)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 19: Empty quoted value
+    {
+        std::ofstream file("empty_quoted.ini");
+        file << "key1=\"\"\n";
+        file << "key2=''\n";
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("empty_quoted.ini");
+        bool check = (result == ini::Parser::ErrorCode::Success &&
+                      parser.get("", "key1") == "" &&
+                      parser.get("", "key2") == "");
+        if (!run_test("Test 19: Empty quoted value", check)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 20: Whitespace-heavy input
+    {
+        std::ofstream file("whitespace_heavy.ini");
+        file << "   key1   =   value1   \n";
+        file << "[   section   ]\n";
+        file << "   key2   =   value2   ; comment\n";
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("whitespace_heavy.ini");
+        bool check = (result == ini::Parser::ErrorCode::Success &&
+                      parser.get("", "key1") == "value1" &&
+                      parser.get("section", "key2") == "value2");
+        if (!run_test("Test 20: Whitespace-heavy input", check)) {
+            ++failed_tests;
+        }
+    }
+
+    // Test 21: Multiple equals signs
+    {
+        std::ofstream file("multiple_equals.ini");
+        file << "key=value=extra\n";
+        file << "key2=\"quoted=value\"\n";
+        file.close();
+
+        ini::Parser parser;
+        auto result = parser.load("multiple_equals.ini");
+        bool check = (result == ini::Parser::ErrorCode::Success &&
+                      parser.get("", "key") == "value=extra" &&
+                      parser.get("", "key2") == "quoted=value");
+        if (!run_test("Test 21: Multiple equals signs", check)) {
+            ++failed_tests;
+        }
+    }
 
     std::cout << "Total failed tests: " << failed_tests << std::endl;
     return failed_tests > 0 ? 1 : 0;
