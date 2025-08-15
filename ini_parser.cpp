@@ -75,7 +75,7 @@ namespace ini {
             EmptyKey,
             DuplicateKey,
             FileWriteFailed,
-            UnmatchedQuotes  // <-- NEW
+            UnmatchedQuotes
         };
 
         static inline std::string errorToString(ErrorCode error) {
