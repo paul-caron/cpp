@@ -1,4 +1,5 @@
-#pragma once
+#ifndef COMMAND_LINE_PARSER
+#define COMMAND_LINE_PARSER
 
 #include <string>
 #include <unordered_map>
@@ -116,3 +117,37 @@ private:
         }
     }
 };
+
+
+/*
+
+#include "command_line_parser.hpp"
+#include <iostream>
+
+int main(int argc, char* argv[]) {
+    CmdLineParser parser(argc, argv);
+
+    if (parser.has("help") || parser.has("h")) {
+        std::cout << "Usage: app [-v] [--file filename] [positional args]\n";
+        return 0;
+    }
+
+    if (parser.has("v")) {
+        std::cout << "Verbose mode enabled\n";
+    }
+
+    if (auto file = parser.get("file"); file) {
+        std::cout << "File option given: " << *file << "\n";
+    }
+
+    const auto& args = parser.getPositionals();
+    for (const auto& arg : args) {
+        std::cout << "Positional arg: " << arg << "\n";
+    }
+
+    return 0;
+}
+*/
+
+
+#endif //COMMAND_LINE_PARSER
