@@ -143,3 +143,38 @@ private:
 };
 
 #endif //MODULE_LOADER_HPP
+
+
+
+/*
+//example use case
+#include "module_loader.hpp"
+#include <iostream>
+
+int main() {
+    const char* libPath = "/lib/x86_64-linux-gnu/libm.so.6";
+
+    ModuleLoader loader;
+    if (!loader.load(libPath)) {
+        std::cerr << "Failed to load math library.\n";
+        return 1;
+    }
+
+    // Load 'cos' function: double cos(double)
+    using CosFunc = double(*)(double);
+    CosFunc cosFunc = loader.getSymbol<CosFunc>("cos");
+
+    if (!cosFunc) {
+        std::cerr << "Failed to find symbol 'cos'\n";
+        return 1;
+    }
+
+    // Call the function
+    double input = 0.5;
+    double result = cosFunc(input);
+    std::cout << "cos(" << input << ") = " << result << std::endl;
+
+    return 0;
+}
+
+*/
